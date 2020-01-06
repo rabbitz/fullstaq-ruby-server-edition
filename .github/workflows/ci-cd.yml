@@ -55,8 +55,6 @@ jobs:
       matrix:
         ruby_version: 
           - 2.7.0
-          - 2.6.5
-          - 2.5.7
     steps:
       - name: Fetch cache
         uses: actions/cache@v1
@@ -138,12 +136,6 @@ jobs:
         distribution: 
           - name: centos-7
             package_format: RPM
-          - name: debian-10
-            package_format: DEB
-          - name: debian-9
-            package_format: DEB
-          - name: ubuntu-18.04
-            package_format: DEB
     steps:
       - uses: actions/checkout@v2
       - name: Fetch cache
@@ -329,39 +321,15 @@ jobs:
             full_version: 2.7.0
             package_revision: 0
             id: 2.7
-          - minor_version: 2.6
-            full_version: 2.6.5
-            package_revision: 4
-            id: 2.6
-          - minor_version: 2.5
-            full_version: 2.5.7
-            package_revision: 3
-            id: 2.5
           - full_version: 2.7.0
             package_revision: 0
             id: 2.7.0
-          - full_version: 2.6.5
-            package_revision: 1
-            id: 2.6.5
-          - full_version: 2.5.7
-            package_revision: 1
-            id: 2.5.7
         distribution: 
           - name: centos-7
             package_format: RPM
-          - name: debian-10
-            package_format: DEB
-          - name: debian-9
-            package_format: DEB
-          - name: ubuntu-18.04
-            package_format: DEB
         variant: 
-          - name: normal
-            package_suffix: ''
           - name: jemalloc
             package_suffix: "-jemalloc"
-          - name: malloctrim
-            package_suffix: "-malloctrim"
     steps:
       - uses: actions/checkout@v2
       - name: Fetch Ruby source
