@@ -57,6 +57,14 @@ module Support
       end
     end
 
+    def distributions_with_test_image_info
+      distributions.map do |distro|
+        distro.merge(
+          test_image: determine_test_image_for(distro)
+        )
+      end
+    end
+
     def variants
       @variants ||= begin
         result = []

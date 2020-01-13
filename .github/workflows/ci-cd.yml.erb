@@ -13,30 +13,40 @@ jobs:
       - uses: actions/setup-ruby@v1
         with:
           ruby-version: '2.6'
+
       - name: Check
-        run: |
-          set -o pipefail
-          ./internal-scripts/generate-ci-cd-yaml.rb .github/workflows/ci-cd.yml.2
-          CHECKSUM_A=$(md5sum .github/workflows/ci-cd.yml | awk '{ print $1 }')
-          CHECKSUM_B=$(md5sum .github/workflows/ci-cd.yml.2 | awk '{ print $1 }')
-          if [[ "$CHECKSUM_A" = "$CHECKSUM_B" ]]; then
-            echo 'Up-to-date!'
-          else
-            echo 'ERROR: .github/workflows/ci-cd.yml is not up-to-date!'
-            echo 'Please run this script, then commit and push:'
-            echo
-            echo '  ./internal-scripts/generate-ci-cd-yaml.rb'
-            echo
-            echo 'TIP: run this on your development machine to ensure generate-ci-cd-yaml.rb is run automatically as a Git pre-commit hook:'
-            echo
-            echo '  git config core.hooksPath .githooks'
-            exit 1
-          fi
-      - name: Show differences
-        if: always()
-        run: |
-          md5sum .github/workflows/ci-cd.yml .github/workflows/ci-cd.yml.2
-          diff -u .github/workflows/ci-cd.yml .github/workflows/ci-cd.yml.2 || true
+        run: ./internal-scripts/ci-cd/check-workflow-uptodate/check.sh
+
+  check_version_numbers_need_bumping:
+    name: Check whether any version numbers need to be bumped
+    needs: download_rbenv_source
+    runs-on: ubuntu-18.04
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-ruby@v1
+        with:
+          ruby-version: '2.6'
+      - name: Fetch Rbenv source
+        uses: actions/download-artifact@v1
+        with:
+          name: rbenv-src
+          path: .
+
+      - name: Extract Rbenv source
+        run: ./internal-scripts/ci-cd/check-version-numbers-need-bumping/extract-rbenv-source.sh
+      - name: Determine latest release tag
+        # Sets environment variable $LATEST_RELEASE_TAG
+        run: ./internal-scripts/ci-cd/check-version-numbers-need-bumping/determine-latest-release-tag.sh
+
+      - name: Check whether the Rbenv version in config.yml is correct
+        run: ./internal-scripts/ci-cd/check-version-numbers-need-bumping/check-rbenv-version.sh
+      - name: Check whether the Rbenv package revision needs bumping
+        run: ./internal-scripts/ci-cd/check-version-numbers-need-bumping/check-rbenv-package-revision.sh
+
+
+  ### Sources ###
 
   download_ruby_sources:
     name: Download Ruby sources
@@ -46,25 +56,26 @@ jobs:
         ruby_version: <%=indentyaml ruby_source_versions %>
     steps:
       - name: Fetch cache
+        id: fetch_cache
         uses: actions/cache@v1
         with:
           path: .
           key: v2-ruby-src-${{ matrix.ruby_version }}
+
+      - uses: actions/checkout@v2
+        if: steps.fetch_cache.outputs.cache-hit != 'true'
       - name: Download
-        run: |
-          MINOR_VERSION=$(sed -E 's/(.+)\..*/\1/' <<<"${{ matrix.ruby_version }}")
-          if [[ -e ruby-src-${{ matrix.ruby_version }}.tar.gz ]]; then
-            echo 'File fetched from cache, no need to download.'
-          else
-            set -x
-            wget --output-document ruby-src.tar.gz \
-              "https://cache.ruby-lang.org/pub/ruby/$MINOR_VERSION/ruby-${{ matrix.ruby_version }}.tar.gz"
-          fi
+        run: ./internal-scripts/ci-cd/download-ruby-sources/download.sh
+        if: steps.fetch_cache.outputs.cache-hit != 'true'
+        env:
+          RUBY_VERSION: ${{ matrix.ruby_version }}
+
       - name: Archive artifact
         uses: actions/upload-artifact@v1
         with:
           name: ruby-src-${{ matrix.ruby_version }}
           path: .
+
 
   download_rbenv_source:
     name: Download Rbenv source
@@ -74,48 +85,29 @@ jobs:
       - uses: actions/setup-ruby@v1
         with:
           ruby-version: '2.6'
-      - name: Determine parameters
-        id: params
-        run: |
-          set -o pipefail
-
-          REPO_URL=$(ruby -ryaml -e 'puts YAML.load_file("config.yml")["rbenv"]["repo"]')
-          REF=$(ruby -ryaml -e 'puts YAML.load_file("config.yml")["rbenv"]["ref"]')
-          CACHE_BODY="$REPO_URL"$'\n'"$REF"
-          CACHE_KEY=$(md5sum <<<"$CACHE_BODY" | awk '{ print $1 }')
-
-          echo "Repo: $REPO_URL"
-          echo "Ref: $REF"
-          echo "Cache key: $CACHE_KEY"
-
-          echo "::set-output name=repo_url::$REPO_URL"
-          echo "::set-output name=ref::$REF"
-          echo "::set-output name=cache_key::$CACHE_KEY"
+      - name: Prepare
+        id: prepare
+        run: ./internal-scripts/ci-cd/download-rbenv-source/prepare.sh
       - name: Fetch cache
         uses: actions/cache@v1
         with:
           path: output
-          key: rbenv-src-${{ steps.params.outputs.cache_key }}
+          key: v2-rbenv-src-${{ steps.prepare.outputs.cache_key }}
+
       - name: Download
-        run: |
-          if [[ -e output/rbenv-src.tar.gz ]]; then
-            echo "Source fetched from cache, no need to download."
-            exit
-          fi
+        run: ./internal-scripts/ci-cd/download-rbenv-source/download.sh
+        env:
+          RBENV_REPO_URL: ${{ steps.prepare.outputs.repo_url }}
+          RBENV_REPO_REF: ${{ steps.prepare.outputs.ref }}
 
-          set -o pipefail
-          mkdir output
-
-          set -x
-          git clone '${{ steps.params.outputs.repo_url }}' rbenv
-          cd rbenv
-          git reset --hard '${{ steps.params.outputs.ref }}'
-          git archive HEAD | gzip --best > ../output/rbenv-src.tar.gz
       - name: Archive artifact
         uses: actions/upload-artifact@v1
         with:
           name: rbenv-src
           path: output
+
+
+  ### Jemalloc ###
 
   build_jemalloc_binaries:
     name: Build Jemalloc binaries
@@ -132,44 +124,32 @@ jobs:
           key: jemalloc-bin-${{ matrix.distribution.name }}-<%= jemalloc_version %>
       - name: Create cache dir
         run: mkdir -p cache
-      - name: Download source
-        run: |
-          if [[ -e cache/jemalloc-src.tar.bz2 ]]; then
-            echo "Source fetched from cache, no need to download."
-          else
-            set -x
-            wget --output-document=cache/jemalloc-src.tar.bz2 "https://github.com/jemalloc/jemalloc/releases/download/<%= jemalloc_version %>/jemalloc-<%= jemalloc_version %>.tar.bz2"
-          fi
-      - name: Build
-        run: |
-          source lib/library.sh
-          ENVIRONMENT_NAME=${{ matrix.distribution.name }}
-          IMAGE_VERSION=$(read_single_value_file "environments/$ENVIRONMENT_NAME/image_tag")
 
-          mkdir output
-          touch output/jemalloc-bin.tar.gz
-          docker run --rm --init \
-            -v "$(pwd):/system:ro" \
-            -v "$(pwd)/cache/jemalloc-src.tar.bz2:/input/jemalloc-src.tar.bz2:ro" \
-            -v "$(pwd)/output/jemalloc-bin.tar.gz:/output/jemalloc-bin.tar.gz" \
-            -v "$(pwd)/cache:/cache:delegated" \
-            -e "ENVIRONMENT_NAME=$ENVIRONMENT_NAME" \
-            -e "PACKAGE_VERSION=${{ matrix.ruby_package_version.id }}" \
-            -e "BUILD_CONCURRENCY=2" \
-            --user "$(id -u):$(id -g)" \
-            "fullstaq/ruby-build-env-$ENVIRONMENT_NAME:$IMAGE_VERSION" \
-            /system/container-entrypoints/build-jemalloc
+      - name: Download source
+        run: ./internal-scripts/ci-cd/build-jemalloc-binaries/download-source.sh
+        env:
+          JEMALLOC_VERSION: '<%= jemalloc_version %>'
+
+      - name: Build
+        run: ./internal-scripts/ci-cd/build-jemalloc-binaries/build.sh
+        env:
+          ENVIRONMENT_NAME: ${{ matrix.distribution.name }}
+
       - name: Archive artifact
         uses: actions/upload-artifact@v1
         with:
           name: jemalloc-bin-${{ matrix.distribution.name }}
           path: output
 
+
+  ### fullstaq-ruby-common ###
+
   build_common_deb:
     name: Build common DEB
     runs-on: ubuntu-18.04
     steps:
       - uses: actions/checkout@v2
+
       - name: Build package
         run: |
           source lib/library.sh
@@ -187,17 +167,20 @@ jobs:
             --user "$(id -u):$(id -g)" \
             "fullstaq/ruby-build-env-utility:$IMAGE_VERSION" \
             /system/container-entrypoints/build-common-deb
+
       - name: Archive artifact
         uses: actions/upload-artifact@v1
         with:
           name: common-deb
           path: output
 
+
   build_common_rpm:
     name: Build common RPM
     runs-on: ubuntu-18.04
     steps:
       - uses: actions/checkout@v2
+
       - name: Build package
         run: |
           source lib/library.sh
@@ -215,11 +198,15 @@ jobs:
             --user "$(id -u):$(id -g)" \
             "fullstaq/ruby-build-env-utility:$IMAGE_VERSION" \
             /system/container-entrypoints/build-common-rpm
+
       - name: Archive artifact
         uses: actions/upload-artifact@v1
         with:
           name: common-rpm
           path: output
+
+
+  ### Rbenv ###
 
   build_rbenv_deb:
     name: Build Rbenv DEB
@@ -232,6 +219,7 @@ jobs:
         with:
           name: rbenv-src
           path: .
+
       - name: Build package
         run: |
           source lib/library.sh
@@ -252,11 +240,13 @@ jobs:
             --user "$(id -u):$(id -g)" \
             "fullstaq/ruby-build-env-utility:$IMAGE_VERSION" \
             /system/container-entrypoints/build-rbenv-deb
+
       - name: Archive artifact
         uses: actions/upload-artifact@v1
         with:
           name: rbenv-deb
           path: output
+
 
   build_rbenv_rpm:
     name: Build Rbenv RPM
@@ -269,6 +259,7 @@ jobs:
         with:
           name: rbenv-src
           path: .
+
       - name: Build package
         run: |
           source lib/library.sh
@@ -289,11 +280,15 @@ jobs:
             --user "$(id -u):$(id -g)" \
             "fullstaq/ruby-build-env-utility:$IMAGE_VERSION" \
             /system/container-entrypoints/build-rbenv-rpm
+
       - name: Archive artifact
         uses: actions/upload-artifact@v1
         with:
           name: rbenv-rpm
           path: output
+
+
+  ### Ruby ###
 
   build_ruby_packages:
     name: Build Ruby packages
@@ -308,6 +303,7 @@ jobs:
         variant: <%=indentyaml variants %>
     steps:
       - uses: actions/checkout@v2
+
       - name: Fetch Ruby source
         uses: actions/download-artifact@v1
         with:
@@ -326,68 +322,78 @@ jobs:
           key: ruby-bin-${{ matrix.ruby_package_version.id }}-${{ matrix.distribution.name }}-${{ matrix.variant.name }}
       - name: Create cache dir
         run: mkdir -p cache
-      - run: ls -lFh --color .
+
       - name: Build binaries
-        run: |
-          source lib/library.sh
-          ENVIRONMENT_NAME=${{ matrix.distribution.name }}
-          IMAGE_VERSION=$(read_single_value_file "environments/$ENVIRONMENT_NAME/image_tag")
+        run: ./internal-scripts/ci-cd/build-ruby-packages/build-binaries.sh
+        env:
+          ENVIRONMENT_NAME: ${{ matrix.distribution.name }}
+          VARIANT_NAME: ${{ matrix.variant.name }}
+          RUBY_PACKAGE_VERSION_ID: ${{ matrix.ruby_package_version.id }}
 
-          if ${{ matrix.variant.name == 'jemalloc' }}; then
-            MOUNT_ARGS=(-v "$(pwd)/jemalloc-bin.tar.gz:/input/jemalloc-bin.tar.gz:ro")
-          else
-            MOUNT_ARGS=()
-          fi
-
-          touch ruby-bin.tar.gz
-          docker run --rm --init \
-            -v "$(pwd):/system:ro" \
-            -v "$(pwd)/ruby-src.tar.gz:/input/ruby-src.tar.gz:ro" \
-            -v "$(pwd)/ruby-bin.tar.gz:/output/ruby-bin.tar.gz" \
-            -v "$(pwd)/cache:/cache:delegated" \
-            "${MOUNT_ARGS[@]}" \
-            -e "VARIANT=${{ matrix.variant.name }}" \
-            -e "BUILD_CONCURRENCY=2" \
-            -e "PACKAGE_VERSION=${{ matrix.ruby_package_version.id }}" \
-            -e "ENVIRONMENT_NAME=$ENVIRONMENT_NAME" \
-            --user "$(id -u):$(id -g)" \
-            "fullstaq/ruby-build-env-$ENVIRONMENT_NAME:$IMAGE_VERSION" \
-            /system/container-entrypoints/build-ruby
       - name: Build package
-        run: |
-          source lib/library.sh
-          IMAGE_VERSION=$(read_single_value_file "environments/utility/image_tag")
+        run: ./internal-scripts/ci-cd/build-ruby-packages/build-package.sh
+        env:
+          DISTRIBUTION_NAME: ${{ matrix.distribution.name }}
+          VARIANT_NAME: ${{ matrix.variant.name }}
+          VARIANT_PACKAGE_SUFFIX: ${{ matrix.variant.package_suffix }}
+          PACKAGE_FORMAT: ${{ matrix.distribution.package_format }}
+          RUBY_PACKAGE_VERSION_ID: ${{ matrix.ruby_package_version.id }}
+          RUBY_PACKAGE_REVISION: ${{ matrix.ruby_package_version.package_revision }}
 
-          mkdir output
-
-          if ${{ matrix.distribution.package_format == 'DEB' }}; then
-            PACKAGE_BASENAME=fullstaq-ruby-${{ matrix.ruby_package_version.id }}${{ matrix.variant.package_suffix }}_${{ matrix.ruby_package_version.package_revision }}-${{ steps.build_package.outputs.distro_suffix }}_amd64.deb
-            touch "output/$PACKAGE_BASENAME"
-
-            docker run --rm --init \
-              -v "$(pwd):/system:ro" \
-              -v "$(pwd)/ruby-bin.tar.gz:/input/ruby-bin.tar.gz:ro" \
-              -v "$(pwd)/output/$PACKAGE_BASENAME:/output/ruby.deb" \
-              -e "REVISION=${{ matrix.ruby_package_version.package_revision }}" \
-              --user "$(id -u):$(id -g)" \
-              "fullstaq/ruby-build-env-utility:$IMAGE_VERSION" \
-              /system/container-entrypoints/build-ruby-deb
-          else
-            DISTRO_SUFFIX=$(sed 's/-//g' <<<"${{ matrix.distribution.name }}")
-            PACKAGE_BASENAME=fullstaq-ruby-${{ matrix.ruby_package_version.id }}${{ matrix.variant.package_suffix }}-rev${{ matrix.ruby_package_version.package_revision }}-$DISTRO_SUFFIX.x86_64.rpm
-            touch "output/$PACKAGE_BASENAME"
-
-            docker run --rm --init "${TTY_ARGS[@]}" \
-              -v "$(pwd):/system:ro" \
-              -v "$(pwd)/ruby-bin.tar.gz:/input/ruby-bin.tar.gz:ro" \
-              -v "$(pwd)/output/$PACKAGE_BASENAME:/output/ruby.rpm" \
-              -e "REVISION=${{ matrix.ruby_package_version.package_revision }}" \
-              --user "$(id -u):$(id -g)" \
-              "fullstaq/ruby-build-env-utility:$IMAGE_VERSION" \
-              /system/container-entrypoints/build-ruby-rpm
-          fi
       - name: Archive package artifact
         uses: actions/upload-artifact@v1
         with:
           name: ruby-pkg_${{ matrix.ruby_package_version.id }}_${{ matrix.distribution.name }}_${{ matrix.variant.name }}
           path: output
+
+
+  ### Tests ###
+
+  test_ruby_packages:
+    name: Test Ruby packages
+    needs:
+      - build_common_deb
+      - build_common_rpm
+      - build_rbenv_deb
+      - build_rbenv_rpm
+      - build_ruby_packages
+    runs-on: ubuntu-18.04
+    strategy:
+      matrix:
+        ruby_package_version: <%=indentyaml ruby_package_versions %>
+        distribution: <%=indentyaml distributions_with_test_image_info %>
+        variant: <%=indentyaml variants %>
+    steps:
+      - uses: actions/checkout@v2
+      - name: Determine parameters
+        id: params
+        run: |
+          FORMAT=$(tr '[:upper]' '[:lower]' <<<"${{ matrix.distribution.package_format }}")
+          echo "::set-output name=package_format_lowercase::$FORMAT"
+
+      - name: Fetch common package
+        uses: actions/download-artifact@v1
+        with:
+          name: common-${{ steps.params.outputs.package_format_lowercase }}
+          path: .
+      - name: Fetch Rbenv package
+        uses: actions/download-artifact@v1
+        with:
+          name: rbenv-${{ steps.params.outputs.package_format_lowercase }}
+          path: .
+      - name: Fetch Ruby package
+        uses: actions/download-artifact@v1
+        with:
+          name: ruby-pkg_${{ matrix.ruby_package_version.id }}_${{ matrix.distribution.name }}_${{ matrix.variant.name }}
+          path: ruby-pkgs
+
+      - name: Run tests
+        run: ./internal-scripts/ci-cd/test-ruby-packages/run-tests.sh
+        env:
+          PACKAGE_FORMAT: ${{ matrix.distribution.package_format }}
+          VARIANT_NAME: ${{ matrix.variant.name }}
+          TEST_IMAGE_NAME: ${{ matrix.distribution.test_image }}
+          RBENV_PACKAGE_BASENAME_DEB: "<%= rbenv_package_basename(:DEB) %>"
+          RBENV_PACKAGE_BASENAME_RPM: "<%= rbenv_package_basename(:RPM) %>"
+          COMMON_PACKAGE_BASENAME_DEB: "<%= common_package_basename(:DEB) %>"
+          COMMON_PACKAGE_BASENAME_RPM: "<%= common_package_basename(:RPM) %>"
