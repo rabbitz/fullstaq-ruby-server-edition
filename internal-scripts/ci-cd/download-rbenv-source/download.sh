@@ -3,8 +3,9 @@ set -e
 set -o pipefail
 
 SELFDIR=$(dirname "$0")
+ROOTDIR=$(cd "$SELFDIR/../../.." && pwd)
 # shellcheck source=../../../lib/library.sh
-source "$SELFDIR/../../../lib/library.sh"
+source "$ROOTDIR/lib/library.sh"
 
 require_envvar RBENV_REPO_URL
 require_envvar RBENV_REPO_REF

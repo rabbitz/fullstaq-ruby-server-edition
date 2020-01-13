@@ -2,8 +2,9 @@
 set -e
 
 SELFDIR=$(dirname "$0")
+ROOTDIR=$(cd "$SELFDIR/../../.." && pwd)
 # shellcheck source=../../../lib/library.sh
-source "$SELFDIR/../../../lib/library.sh"
+source "$ROOTDIR/lib/library.sh"
 
 require_envvar DISTRIBUTION_NAME
 require_envvar VARIANT_NAME
@@ -13,7 +14,7 @@ require_envvar RUBY_PACKAGE_VERSION_ID
 require_envvar RUBY_PACKAGE_REVISION
 
 
-IMAGE_VERSION=$(read_single_value_file "environments/utility/image_tag")
+IMAGE_VERSION=$(read_single_value_file "$ROOTDIR/environments/utility/image_tag")
 
 mkdir output
 
@@ -22,7 +23,7 @@ if [[ "$PACKAGE_FORMAT" = DEB ]]; then
     touch "output/$PACKAGE_BASENAME"
 
     exec docker run --rm --init \
-        -v "$(pwd):/system:ro" \
+        -v "$ROOTDIR:/system:ro" \
         -v "$(pwd)/ruby-bin.tar.gz:/input/ruby-bin.tar.gz:ro" \
         -v "$(pwd)/output/$PACKAGE_BASENAME:/output/ruby.deb" \
         -e "REVISION=$RUBY_PACKAGE_REVISION" \
@@ -35,7 +36,7 @@ else
     touch "output/$PACKAGE_BASENAME"
 
     exec docker run --rm --init \
-        -v "$(pwd):/system:ro" \
+        -v "$ROOTDIR:/system:ro" \
         -v "$(pwd)/ruby-bin.tar.gz:/input/ruby-bin.tar.gz:ro" \
         -v "$(pwd)/output/$PACKAGE_BASENAME:/output/ruby.rpm" \
         -e "REVISION=$RUBY_PACKAGE_REVISION" \

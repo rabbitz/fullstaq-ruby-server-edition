@@ -2,15 +2,16 @@
 set -e
 
 SELFDIR=$(dirname "$0")
+ROOTDIR=$(cd "$SELFDIR/../../.." && pwd)
 # shellcheck source=../../../lib/library.sh
-source "$SELFDIR/../../../lib/library.sh"
+source "$ROOTDIR/lib/library.sh"
 
 require_envvar ENVIRONMENT_NAME
 require_envvar VARIANT_NAME
 require_envvar RUBY_PACKAGE_VERSION_ID
 
 
-IMAGE_VERSION=$(read_single_value_file "environments/$ENVIRONMENT_NAME/image_tag")
+IMAGE_VERSION=$(read_single_value_file "$ROOTDIR/environments/$ENVIRONMENT_NAME/image_tag")
 
 if [[ "$VARIANT_NAME" = jemalloc ]]; then
     MOUNT_ARGS=(-v "$(pwd)/jemalloc-bin.tar.gz:/input/jemalloc-bin.tar.gz:ro")
@@ -21,7 +22,7 @@ fi
 touch ruby-bin.tar.gz
 
 exec docker run --rm --init \
-    -v "$(pwd):/system:ro" \
+    -v "$ROOTDIR:/system:ro" \
     -v "$(pwd)/ruby-src.tar.gz:/input/ruby-src.tar.gz:ro" \
     -v "$(pwd)/ruby-bin.tar.gz:/output/ruby-bin.tar.gz" \
     -v "$(pwd)/cache:/cache:delegated" \

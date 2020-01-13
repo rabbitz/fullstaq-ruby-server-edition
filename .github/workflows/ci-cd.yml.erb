@@ -18,7 +18,7 @@ jobs:
         run: ./internal-scripts/ci-cd/check-workflow-uptodate/check.sh
 
   check_version_numbers_need_bumping:
-    name: Check whether any version numbers need to be bumped
+    name: Check whether any version numbers need to be changed
     needs: download_rbenv_source
     runs-on: ubuntu-18.04
     steps:
@@ -35,15 +35,32 @@ jobs:
           path: .
 
       - name: Extract Rbenv source
-        run: ./internal-scripts/ci-cd/check-version-numbers-need-bumping/extract-rbenv-source.sh
+        run: ./internal-scripts/ci-cd/check-version-numbers-need-changing/extract-rbenv-source.sh
       - name: Determine latest release tag
         # Sets environment variable $LATEST_RELEASE_TAG
-        run: ./internal-scripts/ci-cd/check-version-numbers-need-bumping/determine-latest-release-tag.sh
+        run: ./internal-scripts/ci-cd/check-version-numbers-need-changing/determine-latest-release-tag.sh
 
       - name: Check whether the Rbenv version in config.yml is correct
-        run: ./internal-scripts/ci-cd/check-version-numbers-need-bumping/check-rbenv-version.sh
-      - name: Check whether the Rbenv package revision needs bumping
-        run: ./internal-scripts/ci-cd/check-version-numbers-need-bumping/check-rbenv-package-revision.sh
+        run: ./internal-scripts/ci-cd/check-version-numbers-need-changing/check-rbenv-version.sh
+        if: '!cancelled()'
+      - name: Check whether the Rbenv package revision needs to be changed
+        run: ./internal-scripts/ci-cd/check-version-numbers-need-changing/check-rbenv-package-revision.sh
+        if: '!cancelled()'
+
+      - name: Check whether the fullstaq-ruby-common Debian package version or revision needs to be changed
+        run: ./internal-scripts/ci-cd/check-version-numbers-need-changing/check-common-deb-version-revision.sh
+        if: '!cancelled()'
+      - name: Check whether the fullstaq-ruby-common RPM package version or revision needs to be changed
+        run: ./internal-scripts/ci-cd/check-version-numbers-need-changing/check-common-rpm-version-revision.sh
+        if: '!cancelled()'
+
+      - name: Check whether any Ruby package revisions need to be changed
+        run: ./internal-scripts/ci-cd/check-version-numbers-need-changing/check-ruby-package-revisions.sh
+        if: '!cancelled()'
+
+      - name: Check whether any minor Ruby package revisions need to be changed
+        run: 'true'
+        if: '!cancelled()'
 
 
   ### Sources ###
@@ -128,7 +145,7 @@ jobs:
       - name: Download source
         run: ./internal-scripts/ci-cd/build-jemalloc-binaries/download-source.sh
         env:
-          JEMALLOC_VERSION: '<%= jemalloc_version %>'
+          JEMALLOC_VERSION: "<%= jemalloc_version %>"
 
       - name: Build
         run: ./internal-scripts/ci-cd/build-jemalloc-binaries/build.sh
@@ -151,22 +168,11 @@ jobs:
       - uses: actions/checkout@v2
 
       - name: Build package
-        run: |
-          source lib/library.sh
-          IMAGE_VERSION=$(read_single_value_file "environments/utility/image_tag")
-          PACKAGE_BASENAME=<%= common_package_basename(:DEB) %>
-
-          mkdir output
-          touch output/$PACKAGE_BASENAME
-
-          docker run --rm --init \
-            -v "$(pwd):/system:ro" \
-            -v "$(pwd)/output/$PACKAGE_BASENAME:/output/common.deb" \
-            -e "VERSION=<%= common_deb_version %>" \
-            -e "REVISION=<%= common_deb_package_revision %>" \
-            --user "$(id -u):$(id -g)" \
-            "fullstaq/ruby-build-env-utility:$IMAGE_VERSION" \
-            /system/container-entrypoints/build-common-deb
+        run: ./internal-scripts/ci-cd/build-common-deb/build-package.sh
+        env:
+          PACKAGE_BASENAME: "<%= common_package_basename(:DEB) %>"
+          VERSION: "<%= common_deb_version %>"
+          REVISION: "<%= common_deb_package_revision %>"
 
       - name: Archive artifact
         uses: actions/upload-artifact@v1
@@ -182,22 +188,11 @@ jobs:
       - uses: actions/checkout@v2
 
       - name: Build package
-        run: |
-          source lib/library.sh
-          IMAGE_VERSION=$(read_single_value_file "environments/utility/image_tag")
-          PACKAGE_BASENAME=<%= common_package_basename(:RPM) %>
-
-          mkdir output
-          touch output/$PACKAGE_BASENAME
-
-          docker run --rm --init \
-            -v "$(pwd):/system:ro" \
-            -v "$(pwd)/output/$PACKAGE_BASENAME:/output/common.rpm" \
-            -e "VERSION=<%= common_rpm_version %>" \
-            -e "REVISION=<%= common_rpm_package_revision %>" \
-            --user "$(id -u):$(id -g)" \
-            "fullstaq/ruby-build-env-utility:$IMAGE_VERSION" \
-            /system/container-entrypoints/build-common-rpm
+        run: ./internal-scripts/ci-cd/build-common-rpm/build-package.sh
+        env:
+          PACKAGE_BASENAME: "<%= common_package_basename(:RPM) %>"
+          VERSION: "<%= common_rpm_version %>"
+          REVISION: "<%= common_rpm_package_revision %>"
 
       - name: Archive artifact
         uses: actions/upload-artifact@v1
@@ -221,25 +216,10 @@ jobs:
           path: .
 
       - name: Build package
-        run: |
-          source lib/library.sh
-          IMAGE_VERSION=$(read_single_value_file "environments/utility/image_tag")
-          PACKAGE_BASENAME=<%= rbenv_package_basename(:DEB) %>
-
-          mkdir rbenv
-          tar -C rbenv -xzf rbenv-src.tar.gz
-
-          mkdir output
-          touch output/$PACKAGE_BASENAME
-
-          docker run --rm --init \
-            -v "$(pwd):/system:ro" \
-            -v "$(pwd)/rbenv:/input/rbenv:ro" \
-            -v "$(pwd)/output/$PACKAGE_BASENAME:/output/rbenv.deb" \
-            -e "REVISION=<%= rbenv_package_revision %>" \
-            --user "$(id -u):$(id -g)" \
-            "fullstaq/ruby-build-env-utility:$IMAGE_VERSION" \
-            /system/container-entrypoints/build-rbenv-deb
+        run: ./internal-scripts/ci-cd/build-rbenv-deb/build-package.sh
+        env:
+          PACKAGE_BASENAME: "<%= rbenv_package_basename(:DEB) %>"
+          REVISION: "<%= rbenv_package_revision %>"
 
       - name: Archive artifact
         uses: actions/upload-artifact@v1
@@ -261,25 +241,10 @@ jobs:
           path: .
 
       - name: Build package
-        run: |
-          source lib/library.sh
-          IMAGE_VERSION=$(read_single_value_file "environments/utility/image_tag")
-          PACKAGE_BASENAME=<%= rbenv_package_basename(:RPM) %>
-
-          mkdir rbenv
-          tar -C rbenv -xzf rbenv-src.tar.gz
-
-          mkdir output
-          touch output/$PACKAGE_BASENAME
-
-          docker run --rm --init \
-            -v "$(pwd):/system:ro" \
-            -v "$(pwd)/rbenv:/input/rbenv:ro" \
-            -v "$(pwd)/output/$PACKAGE_BASENAME:/output/rbenv.rpm" \
-            -e "REVISION=<%= rbenv_package_revision %>" \
-            --user "$(id -u):$(id -g)" \
-            "fullstaq/ruby-build-env-utility:$IMAGE_VERSION" \
-            /system/container-entrypoints/build-rbenv-rpm
+        run: ./internal-scripts/ci-cd/build-rbenv-rpm/build-package.sh
+        env:
+          PACKAGE_BASENAME: "<%= rbenv_package_basename(:RPM) %>"
+          REVISION: "<%= rbenv_package_revision %>"
 
       - name: Archive artifact
         uses: actions/upload-artifact@v1

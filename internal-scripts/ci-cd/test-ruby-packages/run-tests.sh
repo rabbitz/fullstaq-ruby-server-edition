@@ -2,8 +2,9 @@
 set -e
 
 SELFDIR=$(dirname "$0")
+ROOTDIR=$(cd "$SELFDIR/../../.." && pwd)
 # shellcheck source=../../../lib/library.sh
-source "$SELFDIR/../../../lib/library.sh"
+source "$ROOTDIR/lib/library.sh"
 
 require_envvar PACKAGE_FORMAT
 require_envvar VARIANT_NAME
@@ -14,7 +15,7 @@ require_envvar COMMON_PACKAGE_BASENAME_DEB
 require_envvar COMMON_PACKAGE_BASENAME_RPM
 
 
-UTILITY_IMAGE_VERSION=$(read_single_value_file environments/utility/image_tag)
+UTILITY_IMAGE_VERSION=$(read_single_value_file "$ROOTDIR/environments/utility/image_tag")
 RUBY_PKG_PATHS=(ruby-pkgs/*)
 
 mkdir repo
@@ -26,7 +27,7 @@ if [[ "$PACKAGE_FORMAT" == DEB ]]; then
 
     echo '--- Entering preparation Docker container ---'
     docker run --rm --init \
-        -v "$(pwd):/system:ro" \
+        -v "$ROOTDIR:/system:ro" \
         -v "$RUBY_DEB_PATH:/input/$(basename "$RUBY_DEB_PATH"):ro" \
         -v "$RBENV_DEB_PATH:/input/$(basename "$RBENV_DEB_PATH"):ro" \
         -v "$COMMON_DEB_PATH:/input/$(basename "$COMMON_DEB_PATH"):ro" \
@@ -38,10 +39,10 @@ if [[ "$PACKAGE_FORMAT" == DEB ]]; then
     echo
     echo '--- Entering main Docker container ---'
     exec docker run --rm --init \
-        -v "$(pwd):/system:ro" \
+        -v "$ROOTDIR:/system:ro" \
         -v "$(pwd)/repo:/input/repo:ro" \
         -e "EXPECTED_VARIANT=$VARIANT_NAME" \
-        -e "DEBUG_ON_FAIL=false" \
+        -e "DEBUG_AFTER_TESTS=false" \
         --user root \
         --entrypoint /system/container-entrypoints/test-debs \
         "$TEST_IMAGE_NAME"
@@ -52,7 +53,7 @@ else
 
     echo '--- Entering preparation Docker container ---'
     docker run --rm --init \
-        -v "$(pwd):/system:ro" \
+        -v "$ROOTDIR:/system:ro" \
         -v "$RUBY_RPM_PATH:/input/$(basename "$RUBY_RPM_PATH"):ro" \
         -v "$RBENV_RPM_PATH:/input/$(basename "$RBENV_RPM_PATH"):ro" \
         -v "$COMMON_RPM_PATH:/input/$(basename "$COMMON_RPM_PATH"):ro" \
@@ -64,10 +65,10 @@ else
     echo
     echo '--- Entering main Docker container ---'
     exec docker run --rm --init \
-        -v "$(pwd):/system:ro" \
+        -v "$ROOTDIR:/system:ro" \
         -v "$(pwd)/repo:/input/repo:ro" \
         -e "EXPECTED_VARIANT=$VARIANT_NAME" \
-        -e "DEBUG_ON_FAIL=false" \
+        -e "DEBUG_AFTER_TESTS=false" \
         --user root \
         --entrypoint /system/container-entrypoints/test-rpms \
         "$TEST_IMAGE_NAME"

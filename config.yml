@@ -58,6 +58,9 @@ rbenv:
   ## suffix. Find it out with:
   ##
   ##   bin/rbenv --version | awk '{ print $2 }' | sed -E 's/(.+)-.*/\1/'
+  ##
+  ## NOTE: if you change `version`, be sure to reset
+  ## `package_revision` to 0.
   version: 1.1.2-7
 
   ## (Required)
@@ -66,6 +69,9 @@ rbenv:
 
 ## (Required)
 ## fullstaq-ruby-common package parameters.
+##
+## NOTE: if you change `version`, be sure to reset
+## `package_revision` to 0.
 common:
   rpm:
     version: 1.0

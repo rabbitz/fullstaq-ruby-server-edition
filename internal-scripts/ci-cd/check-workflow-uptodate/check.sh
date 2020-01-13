@@ -2,7 +2,11 @@
 set -e
 set -o pipefail
 
-./internal-scripts/generate-ci-cd-yaml.rb .github/workflows/ci-cd.yml.2
+SELFDIR=$(dirname "$0")
+ROOTDIR=$(cd "$SELFDIR/../../.." && pwd)
+
+
+"$ROOTDIR"/internal-scripts/generate-ci-cd-yaml.rb .github/workflows/ci-cd.yml.2
 
 CHECKSUM_A=$(md5sum .github/workflows/ci-cd.yml | awk '{ print $1 }')
 CHECKSUM_B=$(md5sum .github/workflows/ci-cd.yml.2 | awk '{ print $1 }')
